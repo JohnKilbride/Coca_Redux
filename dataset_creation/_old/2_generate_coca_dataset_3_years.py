@@ -78,7 +78,7 @@ def loop_over_example (pool_args):
     for year in range(2,13):
         
         # Get the spectral features and label
-        x = spectral[[year],:,:,:].reshape(6, image_data.shape[1], image_data.shape[1])
+        x = spectral[[year-2, year-1, year],:,:,:].reshape(18, image_data.shape[1], image_data.shape[1])
         y = np.expand_dims(label[year-2,:,:], axis=0)
         output = np.concatenate((x, dem, y), axis=0)
         
@@ -86,80 +86,72 @@ def loop_over_example (pool_args):
         output_example = torch.Tensor(output).short()
         
         # Don't write tiles that are only background
-        if  y.max() == 2:
-        
-            # Save the data as torch tensors
-            torch.save(output_example, output_dir + '/' + file_name + "_" + str(year + 2008) + ".pt")
-        
-        elif y.max() == 1 and random.randint(1,10) == 10:
+        if  year == 2:
             
             # Save the data as torch tensors
-            torch.save(output_example, output_dir + '/' + file_name + "_" + str(year + 2008) + ".pt")
+            torch.save(output_example, output_dir + '/' + file_name + "_" + str(year + 2006) + ".pt")
+        
+        elif y.max() == 2:
+        
+            # Save the data as torch tensors
+            torch.save(output_example, output_dir + '/' + file_name + "_" + str(year + 2006) + ".pt")
         
     return None
 
 if __name__ == "__main__":
-    
     # Define the directory with the different tiles
     tile_dir = "/home/john/datasets/coca_data_2022/coca_tiles"
-    
-    # Get the list of tensors to process
-    grid_to_use = pd.read_csv("/home/john/datasets/coca_data_2022/csvs/grid_samples_to_keep.csv")
-    valid_ids = grid_to_use["grid_id"].tolist()
+
+    # Define the tile size
+    tile_size = 128
+    overlap = 96
     
     # Define a path to sub-directories
     for input_file in glob.glob(tile_dir+"/*.tif"):
     
         # Define the output dir
-        output_dir = "/media/john/linux_ssd/tensors"
+        output_dir = "/media/john/linux_ssd/coca_tensors_" + str(tile_size) + "_3yr"
         
         # Check if the image is in the list
         cur_file_name = input_file.split('/')[-1].split('.')[0]
-        for grid_id in valid_ids:
-            
-            if cur_file_name == grid_id:
         
-                # Tempdir location
-                temp_dir_loc = os.path.dirname(input_file)
+        # Tempdir location
+        temp_dir_loc = os.path.dirname(input_file)
+        
+        # Define the output dir
+        temp_dir = create_temporary_dir(temp_dir_loc)
+        
+        # Write the outputs to the temporary directory--config GDAL_CACHEMAX
+        com1 = "gdal_retile.py " 
+        com1 += "-ps " + str(tile_size) + " " + str(tile_size) + " "
+        com1 += "-overlap " + str(overlap) +  " "
+        com1 += "-targetDir " + temp_dir + " "
+        com1 += input_file 
+        os.system(com1)
+        
+        # Identify the tiles that are too small
+        to_remove = []
+        tif_files = glob.glob(temp_dir + "/*.tif")
+        for file in tif_files:
+            raster = gdal.Open(file)
+            width = raster.RasterXSize
+            height = raster.RasterYSize
+            if width != tile_size or height != tile_size:
+                to_remove.append(file)
                 
-                # Define the tile size
-                tile_size = 384
-                
-                # Define the output dir
-                temp_dir = create_temporary_dir(temp_dir_loc)
-                
-                # Write the outputs to the temporary directory--config GDAL_CACHEMAX
-                com1 = "gdal_retile.py " 
-                com1 += "-ps " + str(tile_size) + " " + str(tile_size) + " "
-                com1 += "-overlap " + str(384 - 16) +  " "
-                com1 += "-targetDir " + temp_dir + " "
-                com1 += input_file 
-                os.system(com1)
-                
-                # Identify the tiles that are too small
-                to_remove = []
-                tif_files = glob.glob(temp_dir + "/*.tif")
-                for file in tif_files:
-                    raster = gdal.Open(file)
-                    width = raster.RasterXSize
-                    height = raster.RasterYSize
-                    if width != tile_size or height != tile_size:
-                        to_remove.append(file)
-                        
-                # Remove all of the small tiles
-                for file in to_remove:  
-                    os.remove(file)
-                
-                # Process each GeoTiff shard into a model example
-                files = glob.glob(temp_dir + "/*.tif")
-                files.sort()
-                    
-                # Format the files for pooled processing
-                pool_inputs = []
-                for file in files:
-                    loop_over_example([file, output_dir])
-                
-                # Delete the temporary directory containing the shards
-                delete_temporary_dir(temp_dir)
-                
-                break
+        # Remove all of the small tiles
+        for file in to_remove:  
+            os.remove(file)
+        
+        # Process each GeoTiff shard into a model example
+        files = glob.glob(temp_dir + "/*.tif")
+        files.sort()
+            
+        # Format the files for pooled processing
+        pool_inputs = []
+        for file in files:
+            loop_over_example([file, output_dir])
+        
+        # Delete the temporary directory containing the shards
+        delete_temporary_dir(temp_dir)
+        
