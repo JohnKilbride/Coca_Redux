@@ -1,37 +1,18 @@
-import warnings
-warnings.filterwarnings('ignore')
-
-import numpy as np
-import pandas as pd
-from torch import nn
-from math import ceil
-# from glob import glob
-from argparse import ArgumentParser
-
 import torch
+import torch.nn as nn
+import torch.nn.functional as F
 from torchvision.utils import make_grid
-from torch.utils.data import DataLoader
 
 import pytorch_lightning as pl
-from pytorch_lightning.strategies import DDPStrategy
-from pytorch_lightning.strategies import DDPSpawnStrategy
-from pytorch_lightning.callbacks.model_checkpoint import ModelCheckpoint
-from pytorch_lightning.callbacks.early_stopping import EarlyStopping
 
-import wandb
-from pytorch_lightning.loggers.tensorboard import TensorBoardLogger
 import torchmetrics.functional as metrics
 
 import segmentation_models_pytorch as smp
 import segmentation_models_pytorch.losses as losses
 
-from utils.dataset import load_train_test_val_3yr
-from utils.augmentations import load_augmentations
-from utils.classic_unet import UnetClassic
-
 class SegmentationModel(pl.LightningModule):
 
-    def __init__(self, encoder, decoder, loss_name, learning_rate, max_epochs, batch_size, decay, augs, **kwargs):
+    def __init__(self, encoder, decoder, loss_name, learning_rate, max_epochs, batch_size, decay, augs, test_partitions=None, **kwargs):
         super().__init__()
         
         self.encoder = encoder
@@ -42,6 +23,7 @@ class SegmentationModel(pl.LightningModule):
         self.max_epochs = max_epochs
         self.batch_size = batch_size
         self.augs = augs
+        self.test_partitions = test_partitions
         
         # Log the hyper parameters to tensorboard
         self.save_hyperparameters()
@@ -55,43 +37,34 @@ class SegmentationModel(pl.LightningModule):
         if self.decoder == "Unet":
             self.net = smp.Unet(
                 encoder_name = self.encoder,
-                in_channels = 19,
-                encoder_weights = None,
-                classes = 3,
-                encoder_depth=5
-                )
-        elif self.decoder == "UnetClassic":
-            self.net = UnetClassic(19, 3, True)
-        elif decoder == "DeepLabV3Plus":
-            self.net = smp.DeepLabV3Plus(
-                encoder_name = self.encoder,
-                in_channels = 19,
+                in_channels = 7,
                 encoder_weights = None,
                 classes = 3
                 )
-        elif self.decoder == 'PAN':
-            self.net = smp.PAN(
-                encoder_name = self.encoder, 
+        elif self.decoder == "UnetPlusPlus":
+            self.net = smp.UnetPlusPlus(
+                encoder_name = self.encoder,
+                in_channels = 7,
                 encoder_weights = None,
-                decoder_channels = 32, 
-                in_channels = 19, 
-                classes = 3, 
-                activation = None, 
-                upsampling = 1
+                classes = 3
                 )
-        
+        else:
+            raise ValueError("Invalid decoder name specified.")
+            
         # Configure the loss function
-        if self.loss_name == 'focal':
-            self.loss_funct = losses.FocalLoss(
-                mode = "multiclass",
-                ignore_index = None
-                )
-        elif self.loss_name == 'jaccard':
+        if self.loss_name == "jaccard":
             self.loss_funct = losses.JaccardLoss(
                 mode = "multiclass",
                 from_logits = True
                 )
-        
+        elif self.loss_name == "lovasz":
+            self.loss_funct = losses.LovaszLoss(
+                mode = "multiclass",
+                from_logits = True
+                )
+        else:
+            raise ValueError("Invalid loss function name specified.")
+            
         return None
         
     def forward(self, x):
@@ -99,16 +72,11 @@ class SegmentationModel(pl.LightningModule):
 
     def training_step(self, batch, batch_idx):
         
-        # UNpack the batch
+        # Unpack the batch
         x, y = batch
-        
-        # Crop label if needed for PAN
-        if self.decoder == "PAN":
-            y = self.pan_interior_clip(y)
         
         # Compute the validation Loss
         y_hat = self.net(x)
-        
         loss = self.loss_funct(y_hat, y)
 
         # Compute the loss metrics
@@ -158,9 +126,9 @@ class SegmentationModel(pl.LightningModule):
         
         # Log the metrics
         self.logger.experiment.add_scalar("loss", avg_loss, self.current_epoch)      
-        self.logger.experiment.add_scalar("accuracy", avg_acc, self.current_epoch)      
-        self.logger.experiment.add_scalar("f1", avg_f1, self.current_epoch)      
-        self.logger.experiment.add_scalar("jaccard", avg_jaccard, self.current_epoch)    
+        self.logger.experiment.add_scalar("train_accuracy", avg_acc, self.current_epoch)      
+        self.logger.experiment.add_scalar("train_f1", avg_f1, self.current_epoch)      
+        self.logger.experiment.add_scalar("train_jaccard", avg_jaccard, self.current_epoch)    
         
         # Make the grids
         image = [x['x'] for x in outputs][0].clamp(-2.5, 2.5)
@@ -179,6 +147,12 @@ class SegmentationModel(pl.LightningModule):
         self.logger.experiment.add_image('logits', grid_3, self.current_epoch)
         self.logger.experiment.add_image('segmentation', grid_4, self.current_epoch)
         
+        # Log the partitions if it is the first epoch
+        if self.current_epoch == 0 and self.test_partitions is not None:
+            self.logger.experiment.add_text("test_folds", str(self.test_partitions))
+        else:
+            self.logger.experiment.add_text("test_folds", "N/A")
+        
         # Reset the validation step counter
         self.train_epoch_logger = 0
                 
@@ -188,11 +162,7 @@ class SegmentationModel(pl.LightningModule):
         
         # Unpack the batch
         x, y = batch
-        
-        # Crop label if needed for PAN
-        if self.decoder == "PAN":
-            y = self.pan_interior_clip(y)
-        
+
         # Compute the forward pass
         y_hat = self.net(x)
         
@@ -203,14 +173,25 @@ class SegmentationModel(pl.LightningModule):
         y_hat_max = torch.argmax(y_hat, dim=1)
 
         # Get the interior of the label & predictions
-        if self.decoder != 'PAN':
-            y = self.interior_clip(y)
-            y_hat_max = self.interior_clip(y_hat_max)
+        # Note, this reflects our ultimate inference stratedgy
+        y = self.interior_clip(y)
+        y_hat_max = self.interior_clip(y_hat_max)
         
         # Compute the loss metrics
         val_accuracy = metrics.accuracy(y_hat_max, y, num_classes=3, average='macro')
+        val_accuracy_background = metrics.accuracy(y_hat_max.eq(0).long(), y.eq(0).long(), num_classes=2)
+        val_accuracy_pasture = metrics.accuracy(y_hat_max.eq(1).long(), y.eq(1).long(), num_classes=2)
+        val_accuracy_coca = metrics.accuracy(y_hat_max.eq(2).long(), y.eq(2).long(), num_classes=2)
+        
         val_f1 = metrics.f1_score(y_hat_max, y, num_classes=3, mdmc_average='samplewise', average='macro')
-        val_jaccard = metrics.jaccard_index(y_hat_max, y, num_classes=3)
+        val_f1_background = metrics.f1_score(y_hat_max.eq(0).long(), y.eq(0).long(), num_classes=2, mdmc_average='samplewise', average='macro')
+        val_f1_pasture = metrics.f1_score(y_hat_max.eq(1).long(), y.eq(1).long(), num_classes=2, mdmc_average='samplewise', average='macro')
+        val_f1_coca = metrics.f1_score(y_hat_max.eq(2).long(), y.eq(2).long(), num_classes=2, mdmc_average='samplewise', average='macro')
+        
+        val_jaccard = metrics.jaccard_index(y_hat_max, y, num_classes=3, absent_score=1)
+        val_jaccard_background = metrics.jaccard_index(y_hat_max.eq(0).long(), y.eq(0).long(), num_classes=2, absent_score=1)
+        val_jaccard_pasture = metrics.jaccard_index(y_hat_max.eq(1).long(), y.eq(1).long(), num_classes=2, absent_score=1)
+        val_jaccard_coca = metrics.jaccard_index(y_hat_max.eq(2).long(), y.eq(2).long(), num_classes=2, absent_score=1)
         
         # If this is the first step, log the actual data, otherwise, log a dummy variable
         # This is to allow the validation_epoch_end function to log the segmentation images
@@ -222,8 +203,17 @@ class SegmentationModel(pl.LightningModule):
                 "y_hat": y_hat.detach().cpu(),
                 "val_loss": loss,
                 "val_accuracy": val_accuracy,
+                "val_accuracy_background": val_accuracy_background,
+                "val_accuracy_pasture": val_accuracy_pasture,
+                "val_accuracy_coca": val_accuracy_coca,
                 "val_f1": val_f1, 
-                "val_jaccard": val_jaccard
+                "val_f1_background": val_f1_background, 
+                "val_f1_pasture": val_f1_pasture, 
+                "val_f1_coca": val_f1_coca, 
+                "val_jaccard": val_jaccard,
+                "val_jaccard_background": val_jaccard_background, 
+                "val_jaccard_pasture": val_jaccard_pasture, 
+                "val_jaccard_coca": val_jaccard_coca, 
                 }
         else:
             outputs = {
@@ -232,8 +222,17 @@ class SegmentationModel(pl.LightningModule):
                 "y_hat": torch.Tensor(0).detach().cpu(),
                 "val_loss": loss,
                 "val_accuracy": val_accuracy,
+                "val_accuracy_background": val_accuracy_background,
+                "val_accuracy_pasture": val_accuracy_pasture,
+                "val_accuracy_coca": val_accuracy_coca,
                 "val_f1": val_f1, 
-                "val_jaccard": val_jaccard
+                "val_f1_background": val_f1_background, 
+                "val_f1_pasture": val_f1_pasture, 
+                "val_f1_coca": val_f1_coca, 
+                "val_jaccard": val_jaccard,
+                "val_jaccard_background": val_jaccard_background, 
+                "val_jaccard_pasture": val_jaccard_pasture, 
+                "val_jaccard_coca": val_jaccard_coca, 
                 }
                 
         # Increment the validation step counter
@@ -248,15 +247,37 @@ class SegmentationModel(pl.LightningModule):
         
         # Get the averages of the loss metrics
         avg_loss = torch.stack([x['val_loss'] for x in outputs]).mean()
-        avg_acc = torch.stack([x['val_accuracy'] for x in outputs]).mean()
-        avg_f1 = torch.stack([x['val_f1'] for x in outputs]).mean()
-        avg_jaccard = torch.stack([x['val_jaccard'] for x in outputs]).mean()
+        self.logger.experiment.add_scalar("avg_val_loss", avg_loss, self.current_epoch) 
         
-        # Log the metrics
-        self.logger.experiment.add_scalar("avg_val_loss", avg_loss, self.current_epoch)      
-        self.logger.experiment.add_scalar("avg_val_accuracy", avg_acc, self.current_epoch)      
-        self.logger.experiment.add_scalar("avg_val_f1", avg_f1, self.current_epoch)      
-        self.logger.experiment.add_scalar("avg_val_jaccard", avg_jaccard, self.current_epoch)    
+        # Get the Average classification accuracy
+        avg_acc = torch.stack([x['val_jaccard'] for x in outputs]).mean()
+        avg_acc_background = torch.stack([x['val_accuracy_background'] for x in outputs]).mean()
+        avg_acc_pasture = torch.stack([x['val_accuracy_pasture'] for x in outputs]).mean()
+        avg_acc_coca = torch.stack([x['val_accuracy_coca'] for x in outputs]).mean()
+        self.logger.experiment.add_scalar("val_accuracy", avg_acc, self.current_epoch)  
+        self.logger.experiment.add_scalar("val_accuracy_background", avg_acc_background, self.current_epoch)  
+        self.logger.experiment.add_scalar("val_accuracy_pasture", avg_acc_pasture, self.current_epoch)  
+        self.logger.experiment.add_scalar("val_accuracy_coca", avg_acc_coca, self.current_epoch)  
+        
+        # F1 metrics
+        avg_f1 = torch.stack([x['val_f1'] for x in outputs]).mean()
+        avg_f1_background = torch.stack([x['val_f1_background'] for x in outputs]).mean()
+        avg_f1_pasture = torch.stack([x['val_f1_pasture'] for x in outputs]).mean()
+        avg_f1_coca = torch.stack([x['val_f1_coca'] for x in outputs]).mean()
+        self.logger.experiment.add_scalar("val_f1", avg_f1, self.current_epoch) 
+        self.logger.experiment.add_scalar("val_f1_background", avg_f1_background, self.current_epoch) 
+        self.logger.experiment.add_scalar("val_f1_pasture", avg_f1_pasture, self.current_epoch) 
+        self.logger.experiment.add_scalar("val_f1_coca", avg_f1_coca, self.current_epoch) 
+        
+        # Jaccard metrics
+        avg_jaccard = torch.stack([x['val_jaccard'] for x in outputs]).mean()
+        avg_jaccard_background = torch.stack([x['val_jaccard_background'] for x in outputs]).mean()
+        avg_jaccard_pasture = torch.stack([x['val_jaccard_pasture'] for x in outputs]).mean()
+        avg_jaccard_coca = torch.stack([x['val_jaccard_coca'] for x in outputs]).mean()
+        self.logger.experiment.add_scalar("val_jaccard", avg_jaccard, self.current_epoch) 
+        self.logger.experiment.add_scalar("val_jaccard_background", avg_jaccard_background, self.current_epoch) 
+        self.logger.experiment.add_scalar("val_jaccard_pasture", avg_jaccard_pasture, self.current_epoch) 
+        self.logger.experiment.add_scalar("val_jaccard_coca", avg_jaccard_coca, self.current_epoch) 
         
         # Make the grids
         image = [x['x'] for x in outputs][0].clamp(-2.5, 2.5)
@@ -282,7 +303,7 @@ class SegmentationModel(pl.LightningModule):
 
     def configure_optimizers(self):
         opt =  torch.optim.Adam(self.parameters(), lr=self.learning_rate, weight_decay=self.decay)
-        sched = torch.optim.lr_scheduler.MultiStepLR(opt, [60,80], gamma=0.1)
+        sched = torch.optim.lr_scheduler.MultiStepLR(opt, [10,15], gamma=0.5)
         sched_dict = {'scheduler': sched, 'interval': 'epoch'}
         return [opt], [sched_dict]
 
@@ -297,157 +318,7 @@ class SegmentationModel(pl.LightningModule):
     def interior_clip(self, input_tensor):
         width = input_tensor.shape[-2]
         height = input_tensor.shape[-1]
-        clip_size = width // 2
-        return input_tensor[:,clip_size:clip_size*2, clip_size:clip_size*2]
-    
-    def interior_clip(self, input_tensor):
-        width = input_tensor.shape[-2]
-        height = input_tensor.shape[-1]
-        clip_size = width // 2
-        return input_tensor[:,clip_size:clip_size*2, clip_size:clip_size*2]
-    
-    def pan_interior_clip(self, input_tensor):
-        # Get the dimensions of the tensor
-        width = input_tensor.shape[-2] // 2
-        height = input_tensor.shape[-1] // 2
-        
-        # Clip the tensor
-        width_c = (width // 4) 
-        height_c = (height // 4)
-        input_tensor = input_tensor[:,width-width_c:width+width_c, height-height_c:height+height_c]
-        
-        return input_tensor.contiguous()
-
-def cli_main (args):
-    
-    # ------------
-    # data
-    # ------------
-    
-    # Define the transforms
-    args.augs = load_augmentations()
-    
-    # Load in the dataset
-    train_dataset, test_dataset = load_train_test_val_3yr(args.seed, args.data_dir, args.norm_stats_csv, args.augs)
-    
-    # Define the DataLoader
-    train_loader = DataLoader(train_dataset, 
-                              batch_size = args.batch_size, 
-                              shuffle = True,
-                              num_workers = args.num_workers,
-                              persistent_workers = False,
-                              pin_memory = True,
-                              )    
-    test_loader = DataLoader(test_dataset, 
-                             batch_size = args.batch_size, 
-                             shuffle = False,
-                             num_workers = args.num_workers,
-                             persistent_workers = False,
-                             pin_memory = True,
-                             )      
-    
-    # ------------
-    # logging
-    # ------------  
-    # Add the weights and biases logger
-    model_name = '{decoder}-{loss_name}-{encoder}-{lr}-{decay}-{batch}-{resolution}-{suffix}'
-    args.model_name = model_name.format(
-        decoder = args.decoder,
-        encoder = args.encoder,
-        loss_name = args.loss_name,
-        batch = args.batch_size,
-        lr = args.learning_rate,
-        decay = args.decay,
-        resolution = args.resolution,
-        suffix = args.suffix
-        )
-    logger = TensorBoardLogger(
-        name = args.model_name,
-        save_dir = args.log_dir,
-        )       
-
-    # ------------
-    # Load Model
-    # ------------
-    # Seed everything
-    pl.seed_everything(args.seed, workers=True)
-    
-    # Construct the model
-    dict_args = vars(args)
-    net = SegmentationModel(**dict_args)
-    
-    # ------------- 
-    # Running the model
-    # -------------
-    callback = EarlyStopping(
-        monitor = "val_logger_loss", 
-        min_delta=0.001, 
-        patience=30, 
-        verbose=False, 
-        mode="min"
-        )
-    
-    # Model logging 
-    ModelCheckpoint(
-        monitor='val_logger_loss',
-        filename=args.model_name+'-{epoch:02d}-{val_logger_loss:.2f}',
-        save_top_k=1
-        )
-    
-    # Set the device to GPU zero if 0 is specified for devices
-    if args.gpus == 0:
-        args.gpus = [0]
-    elif args.gpus == 1:
-        args.gpus = [1]
-   
-    trainer = pl.Trainer.from_argparse_args(
-        args,
-        logger = logger,
-        callbacks = [callback],
-        strategy=DDPSpawnStrategy(find_unused_parameters=False),
-        log_every_n_steps = 1,
-        # gradient_clip_val = 0.5
-        # deterministic=True,
-        # auto_select_gpus=True
-        )
-    trainer.fit(net, train_loader, test_loader)
-  
-    print('\n-------------------------------------------')
-    print('            Run Completed                   ')
-    print('-------------------------------------------\n')
-    
-    return None
-            
-if __name__ == '__main__':
-
-    # ------------
-    # args
-    # ------------
-    
-    # Instantiate the parser
-    parser = ArgumentParser(add_help=False)
-    
-    ### Add the model/PTL specific args
-    parser = SegmentationModel.add_model_specific_args(parser)
-    parser = pl.Trainer.add_argparse_args(parser)
-    parser.add_argument('--num_workers', type=int, default=1)
-    
-    ### Dataset stuff
-    parser.add_argument('--data_dir', type=str, default=None)
-    parser.add_argument('--log_dir', type=str, default=None)
-    parser.add_argument('--norm_stats_csv', type=str, default=None)
-    parser.add_argument('--seed', type=int, default=None)
-    parser.add_argument('--resolution', type=int, default=None)
-    parser.add_argument('--suffix', type=str, default=None)
-    
-    ### Training parameters
-    parser.add_argument('--batch_size', type=int, default=None)
-    parser.add_argument('--learning_rate', type=float, default=None)
-    parser.add_argument('--decay', type=float, default=None)
-
-    # Parse the args
-    args = parser.parse_args()
-   
-    # Run the processing
-    cli_main(args)
+        clip_size_width = width // 2
+        clip_size_height = height // 2
+        return input_tensor[:,clip_size_width:clip_size_width*2, clip_size_height:clip_size_height*2]
     

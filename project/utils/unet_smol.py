@@ -2,24 +2,24 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-class UnetClassic(nn.Module):
-    def __init__(self, n_channels, n_classes, bilinear=False):
-        super(UnetClassic, self).__init__()
+class SmolUNet(nn.Module):
+    def __init__(self, n_channels, n_classes, bilinear=True):
+        super(SmolUNet, self).__init__()
         self.n_channels = n_channels
         self.n_classes = n_classes
         self.bilinear = bilinear
 
-        self.inc = DoubleConv(n_channels, 64)
-        self.down1 = Down(64, 128)
-        self.down2 = Down(128, 256)
-        self.down3 = Down(256, 512)
+        self.inc = DoubleConv(n_channels, 4)
+        self.down1 = Down(4, 8)
+        self.down2 = Down(8, 16)
+        self.down3 = Down(16, 32)
         factor = 2 if bilinear else 1
-        self.down4 = Down(512, 1024 // factor)
-        self.up1 = Up(1024, 512 // factor, bilinear)
-        self.up2 = Up(512, 256 // factor, bilinear)
-        self.up3 = Up(256, 128 // factor, bilinear)
-        self.up4 = Up(128, 64, bilinear)
-        self.outc = OutConv(64, n_classes)
+        self.down4 = Down(32, 64 // factor)
+        self.up1 = Up(64, 32 // factor, bilinear)
+        self.up2 = Up(32, 16 // factor, bilinear)
+        self.up3 = Up(16, 8 // factor, bilinear)
+        self.up4 = Up(8, 4, bilinear)
+        self.outc = OutConv(4, n_classes)
 
     def forward(self, x):
         x1 = self.inc(x)
@@ -105,3 +105,12 @@ class OutConv(nn.Module):
 
     def forward(self, x):
         return self.conv(x)
+    
+if __name__ == "__main__":
+    
+    x = torch.rand(1,7,256,256)
+    
+    net = SmolUNet(7,3)
+    
+    print(net(x).shape)
+    

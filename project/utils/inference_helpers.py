@@ -19,7 +19,6 @@ class TileManager():
     '''
     The Tile Manager deals with with creating a prediction over a region. 
     '''
-    
     def __init__(self, origin_row, origin_col, source_rect, tile_size):
         
         self.origin_row = origin_row

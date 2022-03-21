@@ -10,16 +10,14 @@ import pandas as pd
 import re
 import ast
 from multiprocessing import Pool
-import matplotlib.pyplot as plt
+# import matplotlib.pyplot as plt
 from datetime import datetime
 
 import torch
-# import pytorch_lightning as pl
-# import torchvision.transforms as transforms
-# import segmentation_models_pytorch as smp
-# import segmentation_models_pytorch.losses as losses
 
-from utils.inference_helpers import *
+
+from utils.inference_helpers import TileManager
+from utils.inference_helpers import Rectangle
 from utils.segmentation_model import *
 
 def clean_string_list(input_string):
@@ -361,21 +359,6 @@ class ModelApplicator():
             return offset_values[5]
         
 def run_applicator(args):
-    '''
-    "encoder": ,
-    "decoder": ,
-    "model_path": model_path,
-    "time_series_dir": '/media/john/Expansion/coca_composites',
-    "output_dir": '/media/john/Expansion/coca_classifications',
-    "chunk_size": chunk_size,
-    "scale_factor": scale_factor,
-    "year": year,
-    "out_name": "outputs_" + str(year) + "_factor_" + str(scale_factor) + "_chunk_" + str(chunk_size),
-    "device": device,
-    "bands": bands,
-    "silent": True,
-    "in_memory": False
-    '''
     
     configuration = {   
         "encoder": args["encoder"],
@@ -420,7 +403,7 @@ def run_applicator(args):
     return None
 
 
-def test_main():
+def main():
     
     # Define the fixed parameters
     chunk_size = 2048
@@ -458,19 +441,19 @@ def test_main():
             }
         arg_list.append(args)
     
-    # run_applicator(arg_list[0])
+    run_applicator(arg_list[0])
     
-    # Run pooled processing
-    pool = Pool(2)
-    pool.map(run_applicator, arg_list)
-    pool.close()
-    pool.join()
+    # # Run pooled processing
+    # pool = Pool(1)
+    # pool.map(run_applicator, arg_list)
+    # pool.close()
+    # pool.join()
         
     return None
     
 if __name__ == "__main__":
     startTime = datetime.now()
-    test_main()
+    main()
     print(datetime.now() - startTime)
 
 

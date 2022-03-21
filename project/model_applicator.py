@@ -1,4 +1,5 @@
 import tqdm
+import json
 import rasterio
 from rasterio.windows import Window
 import itertools
@@ -12,6 +13,8 @@ import ast
 from multiprocessing import Pool
 import matplotlib.pyplot as plt
 from datetime import datetime
+
+from argparse import ArgumentParser
 
 import torch
 # import pytorch_lightning as pl
@@ -378,99 +381,102 @@ def run_applicator(args):
     '''
     
     configuration = {   
-        "encoder": args["encoder"],
-        "decoder": args["decoder"],
+        "encoder": args.encoder,
+        "decoder": args.decoder,
         "learning_rate": 0.001,
         "loss_name": 'jaccard',
         "max_epochs": 50,
         'batch_size': 2
         }
-    net = SegmentationModel.load_from_checkpoint(args["model_path"], **configuration)
+    net = SegmentationModel.load_from_checkpoint(args.model_path, **configuration)
     net.eval()
     net.freeze()
-    net.cuda(args["device"])
+    net.cuda(args.device)
     
     # Format the input name
-    input_name = args["time_series_dir"] + "/composite_" + str(args["year"]) + ".tif"
+    input_name = args.time_series_dir + "/composite_" + str(args.year) + ".tif"
     
     # Instantiate the geotiff applicator
     applicator = ModelApplicator(
         ptl_model = net, 
         raster_path = input_name, 
-        output_dir = args["output_dir"], 
-        output_name = args["out_name"],
-        tile_size = args["chunk_size"],
-        scale_factor = args["scale_factor"],
-        inference_bands = args["bands"],
+        output_dir = args.output_dir, 
+        output_name = args.out_name,
+        tile_size = args.chunk_size,
+        scale_factor = args.scale_factor,
+        inference_bands = args.bands,
         norm_means = MEANS, 
         norm_stds = STDS,
-        cuda_device = args["device"],
-        silent = args["silent"],
-        in_memory = args["in_memory"],
+        cuda_device = args.device,
+        silent = args.silent,
+        in_memory = args.in_memory,
         )
           
     # Run the processing
-    print("Processing -- " + str(args["year"]))
+    print("Processing -- " + str(args.year))
     applicator.predict()
     applicator = None
     net = None
     torch.cuda.empty_cache()
-    print("Completed -- " + str(args["year"]))
+    print("Completed -- " + str(args.year))
     
     return None
 
+def str_to_bool(in_str):
+    if str(in_str) == "None":
+        return None
+    elif str(in_str) == "True":
+        return True
+    elif str(in_str) == "False":
+        return False
+    else:
+        raise ValueError("str_to_bool -- value for bool should be a string with value 'True' or 'False' (check ya' argparse).")
 
-def test_main():
-    
-    # Define the fixed parameters
-    chunk_size = 2048
-    scale_factor = 2
-    bands = list(range(0,7))
-    encoder = "timm-mobilenetv3_large_100"
-    decoder = "Unet"
-    
-    # Define the model path
-    chp_dir = "/home/john/datasets/coca_data_2022/debugging_logs/timm-mobilenetv3_large_100-Unet-jaccard-0.001-128-128-True-TuningTest/version_0/checkpoints"
-    model_path = chp_dir + '/' + 'timm-mobilenetv3_large_100-Unet-jaccard-0.001-128-128-True-TuningTest-epoch=48-val_logger_loss=0.32.ckpt'
-    
-    # Create the args to loop over
-    arg_list = []
-    # for year in range(1, 2020):
-    for i, year in enumerate([1990, 1995, 2000, 2005, 2010, 2015, 2018]):
-        if i % 2 == 0:
-            device = 0
-        else:
-            device = 1
-        args = {
-            "encoder": encoder,
-            "decoder": decoder,
-            "model_path": model_path,
-            "time_series_dir": '/media/john/Expansion/coca_composites',
-            "output_dir": '/media/john/Expansion/coca_classifications',
-            "chunk_size": chunk_size,
-            "scale_factor": scale_factor,
-            "year": year,
-            "out_name": "outputs_" + str(year) + "_factor_" + str(scale_factor) + "_chunk_" + str(chunk_size),
-            "device": device,
-            "bands": bands,
-            "silent": True,
-            "in_memory": False
-            }
-        arg_list.append(args)
-    
-    # run_applicator(arg_list[0])
-    
-    # Run pooled processing
-    pool = Pool(2)
-    pool.map(run_applicator, arg_list)
-    pool.close()
-    pool.join()
-        
-    return None
-    
+
 if __name__ == "__main__":
+    
+    # Instantiate the parser
+    parser = ArgumentParser(add_help=False)
+    
+    ### Add the model/PTL specific args
+    dflt_mdl_pth = None
+    parser.add_argument('--encoder', type=str, default = "resnet")
+    parser.add_argument('--decoder', type=str, default = "Unet")
+    parser.add_argument('--model_path', type=str, default = None)
+    parser.add_argument('--time_series_dir', type=str, default = None)
+    parser.add_argument('--output_dir', type=str, default=None)
+    parser.add_argument('--chunk_size', type=int, default = None)
+    parser.add_argument('--year', type=int, default = None)
+    parser.add_argument('--log_dir', type=str, default = None)
+    parser.add_argument('--scale_factor', type=int, default = None)
+    parser.add_argument('--out_name', type=str, default=True)
+    parser.add_argument('--device', type=int, default=None)
+    parser.add_argument('--bands', type=json.loads, default='[0,1,2]')
+    parser.add_argument('--silent', type=str_to_bool, default='True')
+    parser.add_argument('--in_memory', type=str_to_bool, default='False')
+
+    # Parse the args
+    args = parser.parse_args()
+    
+    # # Manually set the args for debugging
+    # tmp_chp_dir = "/home/john/datasets/coca_data_2022/resnest_cross_val/timm-mobilenetv3_large_100-Unet-jaccard-0.001-128-128-False-Experiment2-fold=0/version_0/checkpoints/"
+    # tmp_model_path = tmp_chp_dir + '/' + 'timm-mobilenetv3_large_100-Unet-jaccard-0.001-128-128-False-Experiment2-fold=0-epoch=13-val_logger_loss=0.29.ckpt'
+    # args.encoder = "timm-mobilenetv3_large_100"
+    # args.decoder = "Unet"
+    # args.model_path = tmp_model_path
+    # args.time_series_dir = "/media/john/Expansion/coca_composites_small"
+    # args.output_dir =  '/media/john/Expansion/coca_classifications'
+    # args.chunk_size = 128
+    # args.scale_factor = 2
+    # args.year = 2019
+    # args.out_name =  "test_" + str(args.year ) + "_factor_" + str(args.scale_factor) + "_chunk_" + str(args.chunk_size)
+    # args.device = 0
+    # # args.bands = str([0,1,2,3,4,5,6])
+    # args.silent = 'False'
+    # args.in_memory = 'False'
+    
     startTime = datetime.now()
-    test_main()
-    print(datetime.now() - startTime)
+    run_applicator(args)
+    print("\nInference Time", datetime.now() - startTime)
 
 
