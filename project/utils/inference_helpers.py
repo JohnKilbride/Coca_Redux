@@ -26,11 +26,8 @@ class TileManager():
         self.source_rect = source_rect
         self.tile_size = tile_size
         
-        # # Construct the inference tile
-        # self.model_rect = Rectangle(origin_row - (tile_size/4), origin_col - (tile_size/4), 
-        #                              origin_row + ((tile_size/4) * 3), origin_col  + ((tile_size/4) * 3))
-        self.model_rect = Rectangle(origin_row, origin_col, 
-                             origin_row + tile_size, origin_col + tile_size)
+        # Construct the inference tile
+        self.model_rect = Rectangle(origin_row, origin_col, origin_row + tile_size, origin_col + tile_size)
         
         # Get read window by intersecting the source and the model_input
         self.window_rect = source_rect.intersection(self.model_rect)
@@ -122,7 +119,7 @@ class TileManager():
         norm = norm_transform(input_tensor)
                 
         return norm
-    
+
 class Rectangle():
     """
     Based on:

@@ -36,11 +36,12 @@ if __name__ == "__main__":
 
     # Define the parameters related to loading the checkpoint files
     logger_dir = "/home/john/datasets/coca_data_2022/resnest_cross_val/"
-    experiment_name = "timm-mobilenetv3_large_100-Unet-jaccard-0.005-128-128-False-Experiment3"
+    experiment_name = "timm-mobilenetv3_large_100-Unet-jaccard-0.0025-128-128-True-5FoldMobileNet"
     
     # Get the checkpoint files
     checkpoint_paths = load_all_checkpoints(logger_dir, experiment_name)
-    
+    checkpoint_paths.sort()
+  
     # Fop over checkpoint files
     for fold_i, checkpoint_paths in enumerate(checkpoint_paths):
         
@@ -63,11 +64,8 @@ if __name__ == "__main__":
             com2 += '--device ' + str(device) + ' '
             com2 += '--bands ' + bands + ' '
             com2 += '--year ' + str(year) + ' '
-            com2 += '--silent ' + str(True) + ' '
+            com2 += '--silent ' + str(False) + ' '
             com2 += '--in_memory ' + str(True) + ' '
             system(com2)    
-            
-            break
-
 
 

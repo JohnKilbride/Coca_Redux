@@ -17,10 +17,6 @@ from datetime import datetime
 from argparse import ArgumentParser
 
 import torch
-# import pytorch_lightning as pl
-# import torchvision.transforms as transforms
-# import segmentation_models_pytorch as smp
-# import segmentation_models_pytorch.losses as losses
 
 from utils.inference_helpers import *
 from utils.segmentation_model import *
@@ -133,11 +129,6 @@ class ModelApplicator():
             # Trim the prediction raster to the original extent
             trimmed = image[0:self.source_rows, 0:self.source_cols]
             
-            # plt.figure(figsize = (40,40))
-            # plt.imshow(trimmed, interpolation="nearest")
-            # plt.savefig("/media/john/Expansion/temp_" + str(self.tile_size) + "_" + str(self.scale_factor) + ".png")
-            # plt.show()
-            
             # Write out the prediction
             self.__write_prediction_raster(trimmed)
 
@@ -214,13 +205,6 @@ class ModelApplicator():
                         # print(current_tile.window_rect)
                         read_window = Window(ulh_coords[1], ulh_coords[0], self.tile_size, self.tile_size)
                         input_array = torch.Tensor(src.read(window = read_window, boundless=True)).cuda(self.cuda_device)
-                        
-                # # Visualization for debuggin
-                # image_vis = input_array[[2,1,0],:,:].permute(1,2,0).clamp(0, 500).cpu().numpy()
-                # # if image_vis.shape[-1] == self.tile_size and image_vis.shape[-2] == self.tile_size:
-                # plt.imshow(self.__normalize(image_vis))
-                # # ax.add_patch(rect)
-                # plt.show()
                         
                 # Get the prediction
                 # print("input_array", input_array.shape)
@@ -432,7 +416,6 @@ def str_to_bool(in_str):
     else:
         raise ValueError("str_to_bool -- value for bool should be a string with value 'True' or 'False' (check ya' argparse).")
 
-
 if __name__ == "__main__":
     
     # Instantiate the parser
@@ -475,8 +458,8 @@ if __name__ == "__main__":
     # args.silent = 'False'
     # args.in_memory = 'False'
     
-    startTime = datetime.now()
+    # startTime = datetime.now()
     run_applicator(args)
-    print("\nInference Time", datetime.now() - startTime)
+    # print("\nInference Time", datetime.now() - startTime)
 
 

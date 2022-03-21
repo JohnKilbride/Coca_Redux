@@ -1,33 +1,65 @@
 import torch
-import os
 import random as non_np_random
 import pandas as pd
 import re
 import ast
 from math import floor
-from math import ceil
 from glob import glob
 from torch.utils.data import DataLoader
 import matplotlib.pyplot as plt
 import numpy as np
-from PIL import Image
+
 import torchvision.transforms as transforms
-from torchvision.utils import make_grid
-import multiprocessing as mp
 import numpy 
-import elasticdeform
-import elasticdeform.torch as etorch
 from numpy import random
-# from augmentations import load_augmentations
-# from .augmentations import NullTransform
-# from augmentations import AddGaussianNoise
-# from augmentations import RandomMasking
-# from .augmentations import MaskPixels
-# from augmentations import AddGaussianNoise
-# from augmentations import MaskPixels
 
-def load_simple_train_test(seed, train_data_dir, test_data_dir, norm_stats_path, deformed_data_dir = None, transforms=None):
+def load_simple_train_test (seed, train_data_dir, test_data_dir, norm_stats_path, deformed_data_dir = None, transforms=None):
+    '''
+    This function produces a spatially stratified training and testing dataset (80/20) split. 
+    The splitting is based on the spatial partitions defined in the file names. 
+    
+    Training examples are gathered from the training_data_dir, and testing examples
+    are derived from the test_data_dir. It is assumed that each dir has data for all partitions.
+    This allows the degree of overlap in the train/test set to be controlled. 
+    
+    If deformations are precomputed, a directory can be passed and any examples in the
+    training set spatial partitions will be added to the training dataset. 
+    
+    If transforms are supplied, they will be added to the training dataset.
+    
+    Returns the training dataset, the testing dataset, and a list with the names
+    of the testing partitions. 
 
+    Parameters
+    ----------
+    seed : intger
+        The seed used to shuffle the partitions.
+    train_data_dir : str
+        A spatially partitioned dataset containing the data formatted for training the model.
+    test_data_dir : str
+        A spatially partitioned dataset containing the data formatted for model evaluation.
+    norm_stats_path : str
+        DESCRIPTION.
+    deformed_data_dir : str, optional
+        A spatially partitioned dataset containing examples with elastic deformations.
+    transforms : 
+        Transforms applied to the dataset
+
+    Raises
+    ------
+    ValueError
+        If no deformed tensors are detected.
+
+    Returns
+    -------
+    train_dataset :
+        A PyTorch dataset containing the training examples.
+    test_dataset :
+        A PyTorch dataset containing the test examples.
+    test_partitions : list
+        A list containing straings with the partition names.
+
+    '''
     # Get the statistics for normalization
     means = clean_string_list(pd.read_csv(norm_stats_path).means[0])
     stds = clean_string_list(pd.read_csv(norm_stats_path).stds[0])
@@ -67,10 +99,10 @@ def load_simple_train_test(seed, train_data_dir, test_data_dir, norm_stats_path,
     train_dataset = CocaDataset(train_examples_paths, means, stds, transforms, False)
     test_dataset = CocaDataset(test_examples_paths, means, stds, None, False)
     
-    return train_dataset, test_dataset
+    return train_dataset, test_dataset, test_partitions
 
 def partitions_to_folds(seed, train_data_dir, num_folds):
-    
+
     # Glob all of the tensor files in the directory
     train_tensors = glob(train_data_dir + "/*.pt")
 

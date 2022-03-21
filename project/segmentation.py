@@ -25,9 +25,10 @@ def cli_main (args):
     args.augs = load_augmentations(args.use_noise)
     
     # Load in the dataset
-    train_dataset, test_dataset = load_simple_train_test(
+    train_dataset, test_dataset, partitions = load_simple_train_test(
         args.seed, args.train_data_dir, args.test_data_dir, args.norm_stats_csv, args.deformed_data_dir, args.augs
         )
+    args.test_partitions = partitions
     
     # Define the DataLoader
     train_loader = DataLoader(train_dataset, 

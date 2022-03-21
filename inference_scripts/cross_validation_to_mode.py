@@ -25,7 +25,7 @@ if __name__ == "__main__":
     
     # Set constant parameters
     py_file_name = "/home/john/git/Coca_Redux/project/model_applicator.py"
-    encoder = "timm-mobilenetv3_large_100"
+    encoder = "timm-mobilenetv3_small_075"
     decoder = "Unet"
     time_series_dir = "/media/john/Expansion/coca_composites_small"
     output_dir = '/media/john/Expansion/coca_classifications'
@@ -36,11 +36,14 @@ if __name__ == "__main__":
 
     # Define the parameters related to loading the checkpoint files
     logger_dir = "/home/john/datasets/coca_data_2022/resnest_cross_val/"
-    experiment_name = "timm-mobilenetv3_large_100-Unet-jaccard-0.005-128-128-False-Experiment3"
+    
+    
+    experiment_name = "timm-mobilenetv3_small_075-Unet-jaccard-0.001-128-128-False-ExperimentTest"
     
     # Get the checkpoint files
     checkpoint_paths = load_all_checkpoints(logger_dir, experiment_name)
-    
+    checkpoint_paths.sort()
+  
     # Fop over checkpoint files
     for fold_i, checkpoint_paths in enumerate(checkpoint_paths):
         
@@ -66,8 +69,6 @@ if __name__ == "__main__":
             com2 += '--silent ' + str(True) + ' '
             com2 += '--in_memory ' + str(True) + ' '
             system(com2)    
-            
-            break
 
 
 

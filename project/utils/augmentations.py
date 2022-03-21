@@ -1,17 +1,22 @@
 import torch
 import torch.nn as nn
-import random
 import torchvision.transforms as transforms
 
 def load_augmentations(use_noise=True):
     '''
-    Formats all of the different transforms for random augmentation during semantic segmentation.
-    The augmentations here consist of simple rotations and flips.
+    Returns a composed set of torch transforms. If use_noise is False then just
+    geometric transformations are used (e.g., flips, rotations).
+
+    Parameters
+    ----------
+    use_noise : bool, optional
+        Use noise augmentations. The default is True.
 
     Returns
     -------
-    data_transforms : torch transform
-      
+    augmentations : 
+        Torch transforms
+
     '''
     # Define the transforms that need to be use
     if use_noise:
@@ -28,6 +33,8 @@ def load_augmentations(use_noise=True):
                 HorizontaFlip2DTensor()                   # Rotation
             ]),
             transforms.RandomChoice([
+                NullTransform(),                # No transformation
+                NullTransform(),                # No transformation
                 NullTransform(),                # No transformation
                 NullTransform(),                # No transformation
                 RandomPixeldrop(),              # Randomly mask pixels
@@ -64,18 +71,16 @@ class RandomPixeldrop(nn.Module):
         # Get the shape of the input
         f_shp = features.shape
         
-        # If on CPU then you don't need to worry about the device
-        # if features.get_device() == -1:
-        mask_tensor = torch.rand((f_shp[2],f_shp[-1])).gt(torch.rand(1) * 0.25)
+        # Mask values greater than a threshold
+        mask_tensor = torch.rand((f_shp[2],f_shp[-1])).gt(torch.rand(1) * 0.3)
+        
         return (features * mask_tensor, label)
     
     def __repr__(self):
         return self.__class__.__name__
 
 class NullTransform(object):
-    """
-    Placeholder transformation. Does not change the input at all.
-    """
+
     def __init__(self):
         return
 
@@ -135,5 +140,4 @@ class HorizontaFlip2DTensor(object):
 
     def __repr__(self):
         return self.__class__.__name__
-    
     
