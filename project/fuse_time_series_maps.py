@@ -151,14 +151,6 @@ if __name__ == "__main__":
     # Parse the args
     args = parser.parse_args()
     
-    # Manually set the args for debugging
-    args.raster_dir = "/media/john/Expansion/coca_classifications"
-    args.output_dir =  '/media/john/Expansion/coca_cv_mode_maps'
-    args.output_name = "coca_mode_test"
-    args.start_year = 1984
-    args.end_year = 2019
-    args.silent = 'False'
-    
     # Get the runtime of the script
     startTime = datetime.now()
     main(args)

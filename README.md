@@ -1,23 +1,7 @@
-### Deep learning project seed
-Use this seed to start new deep learning / ML projects.
-
-- Built in setup.py
-- Built in requirements
-- Examples with MNIST
-- Badges
-- Bibtex
-
-#### Goals  
-The goal of this seed is to structure ML paper-code the same so that work can easily be extended and replicated.   
-
-### DELETE EVERYTHING ABOVE FOR YOUR PROJECT  
-
- 
----
 
 <div align="center">    
- 
-#  Landsat-based Forest Disturbance Forecasting
+
+#  Coca mapping in the Columbian Amazon
 
 [![Paper](http://img.shields.io/badge/paper-arxiv.1001.2234-B31B1B.svg)](https://www.nature.com/articles/nature14539)
 [![Conference](http://img.shields.io/badge/NeurIPS-2019-4b44ce.svg)](https://papers.nips.cc/book/advances-in-n
@@ -35,10 +19,8 @@ Conference
 </div>
 
 ## To Do   
-1. Extraction script for processing Amazon tiles
-2. Script to compute the Normalization parameters
-2. Data load to read in the written tensors   
- 
+1. Clean up documentation
+
 ## Description   
 What it does   
 
@@ -54,7 +36,6 @@ conda activate forecasting
 conda install -c conda-forge pytorch-lightning
 
  ```   
-
 
 ### Citation   
 ```
